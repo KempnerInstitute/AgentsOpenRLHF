@@ -83,7 +83,7 @@ class BasePPOTrainer(ABC):
         self._wandb = None
         self._tensorboard = None
         self.generated_samples_table = None
-        if self.strategy.args.use_wandb:
+        if self.strategy.args.use_wandb and self.strategy.is_rank_0():
             import wandb
 
             self._wandb = wandb
@@ -166,7 +166,7 @@ class BasePPOTrainer(ABC):
     def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
         if global_step % args.logging_steps == 0:
             # wandb
-            if self._wandb is not None:
+            if self._wandb is not None and self.strategy.is_rank_0():
                 # Add generated samples to wandb using Table
                 if "generated_samples" in logs_dict:
                     # https://github.com/wandb/wandb/issues/2981#issuecomment-1997445737
@@ -185,7 +185,7 @@ class BasePPOTrainer(ABC):
                 }
                 self._wandb.log(logs)
             # TensorBoard
-            elif self._tensorboard is not None:
+            elif self._tensorboard is not None and self.strategy.is_rank_0():
                 for k, v in logs_dict.items():
                     if k == "generated_samples":
                         # Record generated samples in TensorBoard using simple text format
