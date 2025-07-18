@@ -13,6 +13,8 @@ develop-eggs/
 dist/
 downloads/
 eggs/
+run_logs/
+serverlogs/
 .eggs/
 lib/
 lib64/

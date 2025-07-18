@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=gsm_rewards
-#SBATCH --account=kempner_dev
-#SBATCH --partition=kempner_h100
-#SBATCH --output /n/holylfs06/LABS/kempner_dev/Lab/nikhilanand/agents/AgentsOpenRLHF/serverlogs/%A.log
-#SBATCH --error /n/holylfs06/LABS/kempner_dev/Lab/nikhilanand/agents/AgentsOpenRLHF/serverlogs/error_%j.out
-#SBATCH --time=2-00:00:00
+#SBATCH --account=kempner_undergrads
+#SBATCH --partition=kempner
+#SBATCH --output /n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF/serverlogs/%A.log
+#SBATCH --error /n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF/serverlogs/error_%j.out
+#SBATCH --time=5:00:00
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2                             
 #SBATCH --ntasks-per-node=1                                  
@@ -12,10 +12,9 @@
 #SBATCH --mem=200GB
 
 echo "Running on host: $(hostname)"
-
 source ~/.bashrc
-conda deactivate
-conda activate openrlhf_202507
+cd /n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF
+source .venv/bin/activate
 
 module load cuda/12.4.1-fasrc01
 module load gcc/14.2.0-fasrc01

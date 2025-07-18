@@ -1,39 +1,43 @@
 #!/bin/bash
 #SBATCH --job-name="test_grpo"
-#SBATCH --account=kempner_dev
-#SBATCH --output /n/holylfs06/LABS/kempner_dev/Lab/nikhilanand/agents/AgentsOpenRLHF/run_logs/%A.log
-#SBATCH --error /n/holylfs06/LABS/kempner_dev/Lab/nikhilanand/agents/AgentsOpenRLHF/run_logs/error_%j.out
+#SBATCH --account=kempner_undergrads
+#SBATCH --partition=kempner
+#SBATCH --output /n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF/run_logs/%A.log
+#SBATCH --error /n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF/run_logs/error_%j.out
 #SBATCH --export=ALL
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=96
+#SBATCH --cpus-per-task=64
 #SBATCH --mem=512GB
 #SBATCH --exclusive
-#SBATCH --time=0-10:00:00
-#SBATCH --partition=kempner_h100
+#SBATCH --time=0-5:00:00
 
-
-source ~/.bashrc
-conda deactivate
-conda activate openrlhf_202507
+uv python pin 3.12.8
 
 module purge
 
 module load cuda/12.4.1-fasrc01
-
 module load gcc/12.2.0-fasrc01
 module load cmake/3.31.6-fasrc01
 module load cudnn
+module load python/3.12.8-fasrc01
 
-#export LD_LIBRARY_PATH=/n/sw/helmod-rocky8/apps/Core/cuda/11.8.0-fasrc01/lib64:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/n/sw/helmod-rocky8/apps/Core/cuda/12.4.1-fasrc01/cuda/lib64:$LD_LIBRARY_PATH
+source ~/.bashrc
+source /n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF/.venv/bin/activate
 
-export PYTHONPATH=/n/holylfs06/LABS/kempner_dev/Lab/nikhilanand/agents/AgentsOpenRLHF:$PYTHONPATH
+# CUDA environment variables
+export CUDA_HOME=/n/sw/helmod-rocky8/apps/Core/cuda/12.4.1-fasrc01/cuda
+export CUDA_ROOT=$CUDA_HOME
+export PATH=$CUDA_HOME/bin:$PATH
 
+# Library paths for CUDA
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64/stubs:$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+export LIBRARY_PATH=$CUDA_HOME/lib64/stubs:$CUDA_HOME/lib64:$LIBRARY_PATH
 
+export PYTHONPATH=/n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF:$PYTHONPATH
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
-
+export NCCL_SOCKET_IFNAME=ib0
 
 if [[ -z $SLURM_GPUS_ON_NODE ]]; then
     RAY_NUM_GPUS=0
@@ -72,34 +76,28 @@ done
 
 export RAY_ADDRESS="$RAY_HEAD_ADDR"
 
-#  # --remote_rm_url http://$head_node:5000/get_reward \
-
-#/n/holylabs/LABS/sham_lab/Users/mkwun/inference-reasoning/openrlhf_wd/sft_llama3_8b \
-#/n/holylabs/LABS/sham_lab/Users/mkwun/inference-reasoning/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659
-# /n/netscratch/sham_lab/Everyone/mkwun/sft_llama
-
-
 srun --overlap -N 1 -n 1 -w "$head_node" ray job submit --address="http://127.0.0.1:8265" \
-  --runtime-env-json='{"working_dir": "/n/netscratch/kempner_dev/Everyone/nikhilanand/openrlhf_logs_and_artifacts_202507_working_dir"}' \
+  --runtime-env-json='{"working_dir": "/n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/openrlhf_logs"}' \
   -- python3 -m openrlhf.cli.train_ppo_ray \
   --ref_num_nodes 1 \
-  --ref_num_gpus_per_node 4 \
+  --ref_num_gpus_per_node 2 \
+  --colocate_actor_ref \
   --actor_num_nodes 1 \
-  --actor_num_gpus_per_node 4 \
-  --pretrain /n/holylabs/LABS/kempner_dev/Users/nikhilanand/Llama-3-8B-Instruct-HF \
-  --remote_rm_url http://holygpu8a17101:5000/get_reward \
-  --save_path /n/netscratch/kempner_dev/Everyone/nikhilanand/openrlhf_logs_and_artifacts_202507 \
-  --vllm_num_engines 4 \
+  --actor_num_gpus_per_node 2 \
+  --pretrain meta-llama/Llama-3.2-1B-Instruct \
+  --remote_rm_url http://holygpu8a19402:5000/get_reward \
+  --save_path /n/netscratch/kempner_undergrads/Lab/myrahmoun/openrlhf_logs \
+ --vllm_num_engines 2 \
   --vllm_tensor_parallel_size 2 \
-  --micro_train_batch_size 8 \
+  --micro_train_batch_size 4 \
   --train_batch_size 128 \
-  --micro_rollout_batch_size 16 \
-  --rollout_batch_size 1024 \
+  --micro_rollout_batch_size 8 \
+  --rollout_batch_size 64 \
   --max_samples 100000 \
   --max_epochs 10 \
   --num_episodes 3 \
-  --prompt_max_len 2048 \
-  --generate_max_len 2048 \
+  --prompt_max_len 1536 \
+  --generate_max_len 512 \
   --n_samples_per_prompt 8 \
   --zero_stage 3 \
   --bf16 \
@@ -115,9 +113,5 @@ srun --overlap -N 1 -n 1 -w "$head_node" ray job submit --address="http://127.0.
   --flash_attn \
   --gradient_checkpointing \
   --use_wandb True \
-  --wandb_project openrlhf_test_202507 \
-  --wandb_run_name multinode_grpo \
+  --wandb_project openrlhf_test \
   --apply_chat_template \
-
-
-#   --colocate_actor_ref \

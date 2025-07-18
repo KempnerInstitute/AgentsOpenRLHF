@@ -42,7 +42,7 @@ async def main():
         print("This test requires at least 2 GPUs to be meaningful.")
         return
 
-    model_path = "/n/holylabs/LABS/kempner_dev/Users/nikhilanand/Llama-3-8B-Instruct-HF"
+    model_path = "Qwen/Qwen3-0.6B"
     tensor_parallel_size = 2 
 
     print(f"Detected {num_gpus} GPUs. Testing vLLM engine initialization with tensor_parallel_size={tensor_parallel_size}...")

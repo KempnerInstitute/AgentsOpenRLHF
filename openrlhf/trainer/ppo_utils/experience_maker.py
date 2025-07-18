@@ -205,7 +205,16 @@ def update_samples_with_rewards(rewards_info, samples_list):
         samples_list: List of Experience objects to update
     """
     # Process rewards and scores
-    rewards_list = torch.cat([info["rewards"] for info in rewards_info], dim=0).chunk(len(samples_list))
+    # rewards_list = torch.cat([info["rewards"] for info in rewards_info], dim=0).chunk(len(samples_list))
+    # Process rewards and scores
+    # rewards_list = torch.cat([info["rewards"] for info in rewards_info], dim=0).chunk(len(samples_list))
+    rewards_tensors = []
+    for info in rewards_info:
+        if isinstance(info["rewards"], list):
+            rewards_tensors.append(torch.tensor(info["rewards"]))
+        else:
+            rewards_tensors.append(info["rewards"])
+    rewards_list = torch.cat(rewards_tensors, dim=0).chunk(len(samples_list))
     if "scores" in rewards_info[0]:
         scores_list = torch.cat([info["scores"] for info in rewards_info], dim=0).chunk(len(samples_list))
     else:
