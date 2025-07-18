@@ -1,8 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name="sft_qw8"
+#SBATCH --job-name="sft_llama8b"
 #SBATCH --account=kempner_undergrads
-#SBATCH --output /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/run_logs/qwen_%A.log
-#SBATCH --error /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/run_logs/qwen_error_%j.out  # Error file
+#SBATCH --partition=kempner_h100
+#SBATCH --output /n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF/run_logs/qwen_%A.log
+#SBATCH --error /n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF/run_logs/qwen_error_%j.out  # Error file
 #SBATCH --export=ALL
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
@@ -10,7 +11,6 @@
 #SBATCH --cpus-per-task=64                     
 #SBATCH --mem=192GB                               
 #SBATCH --time=05:00:00                 
-#SBATCH --partition=kempner_h100
 
 module load cuda/12.4.1-fasrc01
 export LD_LIBRARY_PATH=/n/sw/helmod-rocky8/apps/Core/cuda/11.8.0-fasrc01/lib64:$LD_LIBRARY_PATH
@@ -19,13 +19,13 @@ module load cudnn
 module load gcc/12.2.0-fasrc01
 
 source ~/.bashrc
-source /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/.venv/bin/activate
+source /n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF/.venv/bin/activate
 
 export NCCL_SOCKET_FAMILY=AF_INET
 export NCCL_SOCKET_IFNAME=ib0
 export NCCL_DEBUG=INFO
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
-export TRITON_CACHE_DIR="/tmp/ellenma/triton_cache_8b"
+export TRITON_CACHE_DIR="/tmp/myrahmoun/triton_cache_8b"
 
 # Distributed Training Configuration
 export GPUS_PER_NODE=4
@@ -59,7 +59,7 @@ srun deepspeed --module openrlhf.cli.train_sft \
    --input_key prompt \
    --output_key response \
    --pretrain Qwen/Qwen3-8B \
-   --save_path /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/openrlhf_artifacts/sft_qwen8 \
+   --save_path /n/holylfs06/LABS/kempner_undergrads/Lab/myrahmoun/AgentsOpenRLHF/openrlhf_artifacts/sft_qwen8 \
    --apply_chat_template \
    --input_template "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{}\n<|im_end|>\n<|im_start|>assistant\n" \
    --train_batch_size 8 \
