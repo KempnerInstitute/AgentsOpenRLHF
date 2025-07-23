@@ -151,3 +151,5 @@ core
 *jianh*
 *test_scripts*
 */checkpoint/*
+sft_evaluation_results/
+openrlhf_artifacts/
