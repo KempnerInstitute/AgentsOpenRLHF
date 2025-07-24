@@ -1,4 +1,5 @@
 """
+sft_main.py
 Main script for comparing Base Llama 8B vs SFT Llama 8B on FrozenLake navigation tasks.
 
 This script runs both models on the same dataset and provides side-by-side comparison.
@@ -14,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from sft_llm_policy import SFTLLMPolicy
 from base_llm_policy import BaseLLMPolicy
-from sft_evaluator import ComparisonEvaluator
+from sft_evaluator import TrajectoryEvaluator
 
 def main():
     parser = argparse.ArgumentParser(description="Compare Base Llama 8B vs SFT Llama 8B on FrozenLake")
@@ -72,7 +73,7 @@ def main():
         logger.info(f"Loading base model: {args.base_model}")
         base_policy = BaseLLMPolicy(
             model_name=args.base_model,
-            temperature=args.temperature,
+            temperature=0.7,  # Higher temperature for base model to reduce repetition
             use_quantization=not args.no_quantization,
             max_tokens=args.max_tokens
         )
@@ -81,20 +82,23 @@ def main():
         logger.info(f"Loading SFT model from: {args.sft_model_path}")
         sft_policy = SFTLLMPolicy(
             model_path=args.sft_model_path,
-            temperature=args.temperature,
+            temperature=0.7,  # Higher temperature for SFT model
             use_quantization=not args.no_quantization,
             max_tokens=args.max_tokens
         )
         
         # Initialize evaluator
-        evaluator = ComparisonEvaluator()
+        evaluator = TrajectoryEvaluator(use_wandb=True, wandb_project="frozenlake-base-vs-sft")
         
         # Run evaluation
-        logger.info(f"Starting comparison evaluation on dataset: {args.dataset}")
+        logger.info(f"Starting trajectory completion evaluation on dataset: {args.dataset}")
         results = evaluator.run_evaluation(base_policy, sft_policy, args.dataset)
         
         # Save results (creates both summary and detailed files)
         summary_file, detailed_file = evaluator.save_results(results_base)
+        
+        # Create and save plot
+        plot_file = evaluator.plot_results(f"{results_base}_plot.png")
         
         # Print summary
         base_summary = results["summary"]["base"]
@@ -102,33 +106,34 @@ def main():
         improvement = results["summary"]["improvement"]
         
         print("\n" + "="*60)
-        print("BASE vs SFT MODEL COMPARISON")
+        print("BASE vs SFT MODEL TRAJECTORY COMPLETION")
         print("="*60)
         print(f"Base Model: {args.base_model}")
         print(f"SFT Model: {sft_model_name}")
         print(f"Dataset: {dataset_name}")
         print(f"Temperature: {args.temperature}")
         print("-"*40)
-        print(f"Base Model Accuracy: {base_summary['overall_accuracy']:.2%}")
-        print(f"SFT Model Accuracy:  {sft_summary['overall_accuracy']:.2%}")
-        print(f"Improvement:         {improvement:+.2%}")
-        print(f"Total Problems:      {base_summary['total_problems']}")
+        print(f"Base Model Success Rate: {base_summary['overall_success_rate']:.2%}")
+        print(f"SFT Model Success Rate:  {sft_summary['overall_success_rate']:.2%}")
+        print(f"Improvement:             {improvement:+.2%}")
+        print(f"Total Problems:          {base_summary['total_problems']}")
         print("-"*40)
-        print("Accuracy by Grid Size:")
+        print("Success Rate by Grid Size:")
         
         for size in sorted(results["by_grid_size"].keys()):
             base_stats = results["by_grid_size"][size]["base"]
             sft_stats = results["by_grid_size"][size]["sft"]
-            size_improvement = sft_stats['accuracy'] - base_stats['accuracy']
-            print(f"  {size}x{size}: Base {base_stats['accuracy']:.2%} "
-                  f"({base_stats['correct']}/{base_stats['total']}) | "
-                  f"SFT {sft_stats['accuracy']:.2%} "
-                  f"({sft_stats['correct']}/{sft_stats['total']}) | "
+            size_improvement = sft_stats['success_rate'] - base_stats['success_rate']
+            print(f"  {size}x{size}: Base {base_stats['success_rate']:.2%} "
+                  f"({base_stats['successful']}/{base_stats['total']}) | "
+                  f"SFT {sft_stats['success_rate']:.2%} "
+                  f"({sft_stats['successful']}/{sft_stats['total']}) | "
                   f"Δ {size_improvement:+.2%}")
         
         print("-"*40)
         print(f"Summary results: {summary_file}")
         print(f"Detailed results: {detailed_file}")
+        print(f"Performance plot: {plot_file}")
         print("="*60)
         
     except Exception as e:

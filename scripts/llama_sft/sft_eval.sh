@@ -70,7 +70,7 @@ python "$EVAL_SCRIPT_DIR/sft_main.py" \
     --sft_model_path "$SFT_MODEL" \
     --dataset "$TEST_FILE" \
     --results_dir "$RESULTS_DIR" \
-    --temperature 0.7 \
+    --temperature 0.1 \
     --max_tokens 150
 
 EVAL_EXIT_CODE=$?

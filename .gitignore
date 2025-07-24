@@ -154,3 +154,4 @@ core
 sft_evaluation_results/
 openrlhf_artifacts/
 comparison_evaluation_results/
+wandb/
