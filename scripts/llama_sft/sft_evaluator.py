@@ -1,16 +1,16 @@
 """
 sft_evaluator.py
 
-Evaluator class for benchmarking SFT Llama performance on FrozenLake navigation tasks.
+Evaluator class for benchmarking SFT Llama vs Base Llama performance on FrozenLake navigation tasks.
 
 This script:
 - Loads JSONL datasets with FrozenLake problems and expected actions
-- Prompts the SFT model to predict next actions for each grid state
-- Parses model output and compares against ground truth actions
+- Prompts both base and SFT models to predict next actions for each grid state
+- Parses model outputs and compares against ground truth actions
 - Logs detailed model responses, extracted actions, and correctness
-- Computes and saves accuracy metrics by grid size
+- Computes and saves accuracy metrics by grid size for both models side-by-side
 
-Designed specifically for SFT Llama 8B evaluation on structured navigation data.
+Designed for comparative evaluation of base vs fine-tuned Llama 8B models.
 """
 
 import json
@@ -19,16 +19,17 @@ import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from sft_llm_policy import SFTLLMPolicy
+from base_llm_policy import BaseLLMPolicy
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class SFTEvaluator:
-    """Evaluator class for SFT Llama evaluation on FrozenLake tasks."""
+class ComparisonEvaluator:
+    """Evaluator class for comparing SFT and Base Llama models on FrozenLake tasks."""
     
     def __init__(self):
-        """Initialize the SFT evaluator."""
+        """Initialize the comparison evaluator."""
         # Action mappings from your dataset
         self.action_mappings = {
             "up": 3, "down": 1, "left": 0, "right": 2,
@@ -102,21 +103,26 @@ class SFTEvaluator:
             "parsing_success": parsed_action is not None
         }
     
-    def _evaluate_single_problem(self, problem: Dict[str, Any], policy: SFTLLMPolicy) -> Dict[str, Any]:
-        """Evaluate model on a single FrozenLake problem."""
+    def _evaluate_single_problem(self, problem: Dict[str, Any], 
+                                base_policy: BaseLLMPolicy, 
+                                sft_policy: SFTLLMPolicy) -> Dict[str, Any]:
+        """Evaluate both base and SFT models on a single FrozenLake problem."""
         prompt = problem["prompt"]
         correct_action = problem["metadata"]["action_int"]
         correct_action_name = problem["metadata"]["action_name"]
         grid_size = problem["metadata"]["grid_size"]
         
-        # Get model response
-        response = policy.respond(prompt)
+        # Get responses from both models
+        base_response = base_policy.respond(prompt)
+        sft_response = sft_policy.respond(prompt)
         
-        # Parse the response
-        parsed = self._parse_action_response(response)
+        # Parse both responses
+        base_parsed = self._parse_action_response(base_response)
+        sft_parsed = self._parse_action_response(sft_response)
         
-        # Check correctness
-        correct = (parsed["parsed_action"] == correct_action) if parsed["parsing_success"] else False
+        # Check correctness for both
+        base_correct = (base_parsed["parsed_action"] == correct_action) if base_parsed["parsing_success"] else False
+        sft_correct = (sft_parsed["parsed_action"] == correct_action) if sft_parsed["parsing_success"] else False
         
         # Extract grid for logging
         grid_repr = self._extract_grid_from_prompt(prompt)
@@ -125,91 +131,140 @@ class SFTEvaluator:
             "grid_size": grid_size,
             "correct_action": correct_action,
             "correct_action_name": correct_action_name,
-            "parsed_action": parsed["parsed_action"],
-            "parsed_action_name": self.int_to_action.get(parsed["parsed_action"], "Unknown") if parsed["parsed_action"] is not None else "None",
-            "correct": correct,
-            "parsing_success": parsed["parsing_success"],
-            "model_raw_response": parsed["raw_response"],
             "grid_repr": grid_repr,
-            "optimal_path_length": problem["metadata"].get("optimal_path_length", "Unknown")
+            "optimal_path_length": problem["metadata"].get("optimal_path_length", "Unknown"),
+            
+            # Base model results
+            "base_parsed_action": base_parsed["parsed_action"],
+            "base_parsed_action_name": self.int_to_action.get(base_parsed["parsed_action"], "Unknown") if base_parsed["parsed_action"] is not None else "None",
+            "base_correct": base_correct,
+            "base_parsing_success": base_parsed["parsing_success"],
+            "base_raw_response": base_parsed["raw_response"],
+            
+            # SFT model results
+            "sft_parsed_action": sft_parsed["parsed_action"],
+            "sft_parsed_action_name": self.int_to_action.get(sft_parsed["parsed_action"], "Unknown") if sft_parsed["parsed_action"] is not None else "None",
+            "sft_correct": sft_correct,
+            "sft_parsing_success": sft_parsed["parsing_success"],
+            "sft_raw_response": sft_parsed["raw_response"],
         }
         
         return result
     
-    def run_evaluation(self, policy: SFTLLMPolicy, dataset_path: str) -> Dict[str, Any]:
-        """Main evaluation loop."""
-        logger.info("Starting SFT model evaluation...")
+    def run_evaluation(self, base_policy: BaseLLMPolicy, sft_policy: SFTLLMPolicy, 
+                      dataset_path: str) -> Dict[str, Any]:
+        """Main evaluation loop comparing base and SFT models."""
+        logger.info("Starting base vs SFT model comparison evaluation...")
         
         # Load dataset
         dataset = self.load_dataset(dataset_path)
         
-        # Track results by grid size
+        # Track results by grid size for both models
         size_results = {}
         
         # Evaluate each problem
         for i, problem in enumerate(dataset):
-            result = self._evaluate_single_problem(problem, policy)
+            result = self._evaluate_single_problem(problem, base_policy, sft_policy)
             self.results["detailed_results"].append(result)
             
             grid_size = result["grid_size"]
             if grid_size not in size_results:
-                size_results[grid_size] = {"correct": 0, "total": 0, "parsing_failures": 0}
+                size_results[grid_size] = {
+                    "base": {"correct": 0, "total": 0, "parsing_failures": 0},
+                    "sft": {"correct": 0, "total": 0, "parsing_failures": 0}
+                }
             
-            size_results[grid_size]["total"] += 1
-            if result["correct"]:
-                size_results[grid_size]["correct"] += 1
-            if not result["parsing_success"]:
-                size_results[grid_size]["parsing_failures"] += 1
+            # Update base model stats
+            size_results[grid_size]["base"]["total"] += 1
+            if result["base_correct"]:
+                size_results[grid_size]["base"]["correct"] += 1
+            if not result["base_parsing_success"]:
+                size_results[grid_size]["base"]["parsing_failures"] += 1
+            
+            # Update SFT model stats
+            size_results[grid_size]["sft"]["total"] += 1
+            if result["sft_correct"]:
+                size_results[grid_size]["sft"]["correct"] += 1
+            if not result["sft_parsing_success"]:
+                size_results[grid_size]["sft"]["parsing_failures"] += 1
             
             # Log progress
             if (i + 1) % 50 == 0:
                 logger.info(f"Evaluated {i + 1}/{len(dataset)} problems")
             
             # Detailed logging for first few problems of each size
-            if size_results[grid_size]["total"] <= 3:
+            if size_results[grid_size]["base"]["total"] <= 3:
                 logger.info(f"\n--- Problem {i+1} ({grid_size}x{grid_size}) ---")
                 logger.info(f"Grid:\n{result['grid_repr']}")
                 logger.info(f"Correct Action: {result['correct_action_name']} ({result['correct_action']})")
-                logger.info(f"Parsed Action: {result['parsed_action_name']} ({result['parsed_action']})")
-                logger.info(f"Model response: {result['model_raw_response'][:200]}...")
-                logger.info(f"Result: {'CORRECT' if result['correct'] else 'INCORRECT'}")
+                logger.info(f"Base Model: {result['base_parsed_action_name']} ({result['base_parsed_action']}) - {'✓' if result['base_correct'] else '✗'}")
+                logger.info(f"SFT Model: {result['sft_parsed_action_name']} ({result['sft_parsed_action']}) - {'✓' if result['sft_correct'] else '✗'}")
+                logger.info(f"Base response: {result['base_raw_response'][:150]}...")
+                logger.info(f"SFT response: {result['sft_raw_response'][:150]}...")
         
-        # Calculate summary statistics
+        # Calculate summary statistics for both models
         self.results["by_grid_size"] = {}
-        total_correct = 0
+        base_total_correct = 0
+        sft_total_correct = 0
         total_problems = 0
         
         for size, stats in size_results.items():
-            accuracy = stats["correct"] / stats["total"] if stats["total"] > 0 else 0
-            parse_rate = (stats["total"] - stats["parsing_failures"]) / stats["total"] if stats["total"] > 0 else 0
+            base_accuracy = stats["base"]["correct"] / stats["base"]["total"] if stats["base"]["total"] > 0 else 0
+            sft_accuracy = stats["sft"]["correct"] / stats["sft"]["total"] if stats["sft"]["total"] > 0 else 0
+            
+            base_parse_rate = (stats["base"]["total"] - stats["base"]["parsing_failures"]) / stats["base"]["total"] if stats["base"]["total"] > 0 else 0
+            sft_parse_rate = (stats["sft"]["total"] - stats["sft"]["parsing_failures"]) / stats["sft"]["total"] if stats["sft"]["total"] > 0 else 0
             
             self.results["by_grid_size"][size] = {
-                "accuracy": accuracy,
-                "correct": stats["correct"],
-                "total": stats["total"],
-                "parsing_success_rate": parse_rate,
-                "parsing_failures": stats["parsing_failures"]
+                "base": {
+                    "accuracy": base_accuracy,
+                    "correct": stats["base"]["correct"],
+                    "total": stats["base"]["total"],
+                    "parsing_success_rate": base_parse_rate,
+                    "parsing_failures": stats["base"]["parsing_failures"]
+                },
+                "sft": {
+                    "accuracy": sft_accuracy,
+                    "correct": stats["sft"]["correct"],
+                    "total": stats["sft"]["total"],
+                    "parsing_success_rate": sft_parse_rate,
+                    "parsing_failures": stats["sft"]["parsing_failures"]
+                }
             }
             
-            total_correct += stats["correct"]
-            total_problems += stats["total"]
+            base_total_correct += stats["base"]["correct"]
+            sft_total_correct += stats["sft"]["correct"]
+            total_problems += stats["base"]["total"]  # Fixed: accumulate instead of overwrite
         
         # Overall summary
-        overall_accuracy = total_correct / total_problems if total_problems > 0 else 0
+        base_overall_accuracy = base_total_correct / total_problems if total_problems > 0 else 0
+        sft_overall_accuracy = sft_total_correct / total_problems if total_problems > 0 else 0
+        
         self.results["summary"] = {
-            "overall_accuracy": overall_accuracy,
-            "total_correct": total_correct,
-            "total_problems": total_problems,
+            "base": {
+                "overall_accuracy": base_overall_accuracy,
+                "total_correct": base_total_correct,
+                "total_problems": total_problems
+            },
+            "sft": {
+                "overall_accuracy": sft_overall_accuracy,
+                "total_correct": sft_total_correct,
+                "total_problems": total_problems
+            },
+            "improvement": sft_overall_accuracy - base_overall_accuracy,
             "grid_sizes_tested": list(size_results.keys())
         }
         
         # Log final results
-        logger.info(f"\n=== Evaluation Complete ===")
-        logger.info(f"Overall Accuracy: {overall_accuracy:.2%} ({total_correct}/{total_problems})")
+        logger.info(f"\n=== Comparison Evaluation Complete ===")
+        logger.info(f"Base Model Accuracy: {base_overall_accuracy:.2%} ({base_total_correct}/{total_problems})")
+        logger.info(f"SFT Model Accuracy: {sft_overall_accuracy:.2%} ({sft_total_correct}/{total_problems})")
+        logger.info(f"Improvement: {self.results['summary']['improvement']:.2%}")
         
         for size in sorted(size_results.keys()):
-            stats = self.results["by_grid_size"][size]
-            logger.info(f"Grid {size}x{size}: {stats['accuracy']:.2%} ({stats['correct']}/{stats['total']})")
+            base_stats = self.results["by_grid_size"][size]["base"]
+            sft_stats = self.results["by_grid_size"][size]["sft"]
+            logger.info(f"Grid {size}x{size}: Base {base_stats['accuracy']:.2%} vs SFT {sft_stats['accuracy']:.2%}")
         
         return self.results
     
