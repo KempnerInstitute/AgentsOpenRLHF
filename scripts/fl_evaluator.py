@@ -21,7 +21,8 @@ class FrozenLakeEvaluator:
             "total_paths": 0,
             "success_rate": 0.0,
             "grid_size_breakdown": defaultdict(lambda: {"success": 0, "total": 0}),
-            "errors": [],
+            "individual_results": defaultdict(list),
+            "action_path": [],
         }
 
         data = self._load_jsonl(data_file)
@@ -33,7 +34,7 @@ class FrozenLakeEvaluator:
                 response = item.get("response", item.get("output", ""))
 
                 if not prompt or not response:
-                    results["errors"].append(f"Item {i}: Missing prompt or response")
+                    results["errors"].append(f"Map {i}: Missing prompt or response")
                     results["total_paths"] += 1
                     continue
 
@@ -60,14 +61,20 @@ class FrozenLakeEvaluator:
                 )
                 results["grid_size_breakdown"][grid_size]["success"] += int(success)
                 results["grid_size_breakdown"][grid_size]["total"] += 1
+                results["individual_results"][grid_size].append(int(success))
 
                 if not success:
-                    results["errors"].append(
-                        f"Path {i}: Failed to reach goal with actions {actions}"
+                    results["action_path"].append(
+                        f"Map {i}: Failed to reach goal with actions {actions}"
+                    )
+                else:
+                    results["action_path"].append(
+                        f"Map {i}: Reached goal with actions {actions}"
                     )
 
             except Exception as e:
-                results["errors"].append(f"Path {i}: Error - {str(e)}")
+                results["action_path"].append(f"Map {i}: Error - {str(e)}")
+                results["individual_results"]["unknown"].append(0)
                 results["total_paths"] += 1  # Still count failed attempts
                 continue
 
@@ -230,13 +237,6 @@ class FrozenLakeEvaluator:
             print(
                 f"Grid {size}x{size}: {stats['success']}/{stats['total']} ({success_rate:.2%})"
             )
-
-        if results["errors"]:
-            print("\n=== Errors (first 10) ===")
-            for error in results["errors"][:10]:
-                print(f"  {error}")
-            if len(results["errors"]) > 10:
-                print(f"  ... and {len(results['errors']) - 10} more errors")
 
     def save_results(self, results: Dict, output_path: str):
         """Save results to JSON file"""

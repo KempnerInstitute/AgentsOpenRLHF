@@ -1,63 +1,29 @@
-#!/usr/bin/env python3
-"""
-Evaluate both base Qwen and fine-tuned Qwen on frozen lake problems
-"""
-
+import argparse
+import os
 import json
-from tqdm import tqdm
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import argparse
-from pathlib import Path
-from scripts.fl_evaluator import FrozenLakeEvaluator
+from tqdm import tqdm
 
-# def generate_responses(model, tokenizer, test_file, output_file, model_name):
-#     """Generate model responses for all test prompts"""
-#     print(f"Generating responses with {model_name}...")
+def create_model_filename(model_path, model_type, output_path):
+    """Create descriptive filename based on model path and type"""
+    # Extract model name from path
+    if "/" in model_path:
+        # For paths like "Qwen/Qwen3-8B" or "./openrlhf_artifacts/sft_qwen8"
+        model_name = model_path.split("/")[-1]
+    else:
+        model_name = model_path
     
-#     responses = []
+    # Clean up the model name and make it filename-safe
+    model_name = model_name.lower().replace("-", "_").replace(" ", "_")
     
-#     with open(test_file, 'r') as f:
-#         test_data = [json.loads(line) for line in f if line.strip()]
+    # Add model type (base or finetuned)
+    if model_type == "base":
+        filename = f"{model_name}_base"
+    else:
+        filename = f"{model_name}_finetuned"
     
-#     print(f"Processing {len(test_data)} test cases...")
-    
-#     for i, item in enumerate(tqdm(test_data, desc="Processing")):
-#         # if i % 10 == 0:
-#         #     print(f"Progress: {i}/{len(test_data)}")
-            
-#         prompt = item['prompt']
-        
-#         # Tokenize and generate
-#         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-        
-#         with torch.no_grad():
-#             outputs = model.generate(
-#                 **inputs, 
-#                 max_length=512, 
-#                 temperature=0.1,
-#                 do_sample=True,
-#                 pad_token_id=tokenizer.eos_token_id,
-#                 repetition_penalty=1.1,
-#                 use_cache=True
-#             )
-        
-#         # Decode response (remove the prompt part)
-#         full_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-#         response = full_response[len(prompt):].strip()
-        
-#         # Save in format your evaluator expects
-#         responses.append({
-#             'prompt': prompt,
-#             'response': response
-#         })
-    
-#     # Save responses
-#     with open(output_file, 'w') as f:
-#         for item in responses:
-#             f.write(json.dumps(item) + '\n')
-    
-#     print(f"Saved {len(responses)} responses to {output_file}")
+    return os.path.join(output_path, filename)
 
 def generate_responses(model, tokenizer, test_file, output_file, model_name):
     """Generate model responses for all test prompts"""
@@ -108,7 +74,7 @@ def generate_responses(model, tokenizer, test_file, output_file, model_name):
     
     print(f"Saved {len(responses)} responses to {output_file}")
 
-def evaluate_model(model_path, model_name, test_file, evaluator_class):
+def evaluate_model(model_path, model_name, test_file, evaluator_class, output_path, model_type="base"):
     """Load model and evaluate on frozen lake"""
     print(f"\n{'='*50}")
     print(f"Evaluating: {model_name}")
@@ -125,8 +91,13 @@ def evaluate_model(model_path, model_name, test_file, evaluator_class):
     model = model.to(device)
     print(f"Using device: {device}")
     
-    # Generate responses
-    output_file = f"{model_name.lower().replace(' ', '_')}_responses.jsonl"
+    # Create output directory if it doesn't exist
+    os.makedirs(output_path, exist_ok=True)
+    
+    # Generate responses with descriptive filename
+    base_filename = create_model_filename(model_path, model_type, output_path)
+    output_file = f"{base_filename}_hilr_responses.jsonl"
+    
     generate_responses(model, tokenizer, test_file, output_file, model_name)
     
     # Evaluate with your script
@@ -138,16 +109,17 @@ def evaluate_model(model_path, model_name, test_file, evaluator_class):
     evaluator.print_detailed_results(results)
     
     # Save detailed results
-    results_file = f"{model_name.lower().replace(' ', '_')}_results.json"
+    results_file = f"{base_filename}_results.json"
     evaluator.save_results(results, results_file)
     
     return results
 
 def main():
     parser = argparse.ArgumentParser(description="Compare base vs fine-tuned model on frozen lake")
-    parser.add_argument("--test_file", default="/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/data/frozen_lake/test_deduplicated.jsonl", help="JSONL file with test prompts")
-    parser.add_argument("--base_model", default="Qwen/Qwen3-8B", help="Base model path")
-    parser.add_argument("--finetuned_model", default="./openrlhf_artifacts/sft_qwen8", help="Fine-tuned model path")
+    parser.add_argument("--test-file", default="/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/data/frozen_lake/test_deduplicated.jsonl", help="JSONL file with test prompts")
+    parser.add_argument("--base-model", default="Qwen/Qwen3-14B", help="Base model path")
+    parser.add_argument("--finetuned-model", default="./openrlhf_artifacts/sft_qwen14", help="Fine-tuned model path")
+    parser.add_argument("--output-path", default="/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/eval_output/", help="Output directory path")
     
     args = parser.parse_args()
     
@@ -166,7 +138,9 @@ def main():
         args.base_model, 
         "Base Qwen", 
         args.test_file, 
-        FrozenLakeEvaluator
+        FrozenLakeEvaluator,
+        args.output_path,
+        model_type="base"
     )
     
     # Evaluate fine-tuned model
@@ -175,7 +149,9 @@ def main():
         args.finetuned_model, 
         "Fine-tuned Qwen", 
         args.test_file, 
-        FrozenLakeEvaluator
+        FrozenLakeEvaluator,
+        args.output_path,
+        model_type="finetuned"
     )
     
     # Compare results
@@ -188,9 +164,16 @@ def main():
     improvement = ft_results['success_rate'] - base_results['success_rate']
     print(f"Improvement:                   {improvement:+.2%}")
     
+    # Show actual filenames that were created
+    base_filename = create_model_filename(args.base_model, "base", args.output_path)
+    ft_filename = create_model_filename(args.finetuned_model, "finetuned", args.output_path)
+    
     print(f"\nDetailed results saved to:")
-    print(f"  - base_qwen8_results.json")
-    print(f"  - fine_tuned_qwen8_results.json")
+    print(f"  - {base_filename}_results.json")
+    print(f"  - {ft_filename}_results.json")
+    print(f"\nResponse files saved to:")
+    print(f"  - {base_filename}_responses.jsonl")
+    print(f"  - {ft_filename}_responses.jsonl")
 
 if __name__ == "__main__":
     main()
