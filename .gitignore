@@ -151,7 +151,8 @@ core
 *jianh*
 *test_scripts*
 */checkpoint/*
-sft_evaluation_results/
+
+# Other
 openrlhf_artifacts/
 comparison_evaluation_results/
 wandb/
