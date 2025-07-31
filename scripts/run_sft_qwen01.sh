@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name="sft_qw14"
-#SBATCH --account=kempner_undergrads
-#SBATCH --output /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/run_logs/qwen14_%A.log
-#SBATCH --error /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/run_logs/qwen14_error_%j.out  # Error file
+#SBATCH --account=kempner_sham_lab
+#SBATCH --output /n/holylfs06/LABS/sham_lab/Users/mkwun/AgentsOpenRLHF/run_logs/qwen14_%A.log
+#SBATCH --error /n/holylfs06/LABS/sham_lab/Users/mkwun/AgentsOpenRLHF/run_logs/qwen14_error_%j.out  # Error file
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1  
@@ -12,22 +12,17 @@
 #SBATCH --time=7:00:00 
 #SBATCH --partition kempner_h100
 
-module load cuda/12.4.1-fasrc01
-module load python/3.12.8-fasrc01
+module load cuda/12.4.1-fasrc01 cudnn gcc/12.2.0-fasrc01
 
-module load cudnn
-module load gcc/12.2.0-fasrc01
+source ~/.bashrc
+conda activate openrlhf
 
-# source ~/.bashrc
-source /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/.venv/bin/activate
-cd /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma
-
-export NCCL_SOCKET_FAMILY=AF_INET
-export NCCL_SOCKET_IFNAME=ib0
-export NCCL_DEBUG=INFO
-export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
-export TRITON_CACHE_DIR="/tmp/ellenma/triton_cache_14b"
-export HF_HOME=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/hf_cache
+# export NCCL_SOCKET_FAMILY=AF_INET
+# export NCCL_SOCKET_IFNAME=ib0
+# export NCCL_DEBUG=INFO
+# export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+# export TRITON_CACHE_DIR="/tmp/ellenma/triton_cache_14b"
+# export HF_HOME=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/hf_cache
 
 
 # Distributed Training Configuration
@@ -56,26 +51,26 @@ if [ -z ${MASTER_PORT+x} ]; then
     exit
 fi
 
-export HF_DATASETS_CACHE=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/cache/hf_datasets
-export TMPDIR=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/tmp
-export HOME_CACHE=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/home_cache
-export TORCH_HOME=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/torch_cache
-export XDG_CACHE_HOME=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/xdg_cache
+# export HF_DATASETS_CACHE=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/cache/hf_datasets
+# export TMPDIR=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/tmp
+# export HOME_CACHE=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/home_cache
+# export TORCH_HOME=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/torch_cache
+# export XDG_CACHE_HOME=/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/xdg_cache
 
 # deepspeed hanging prevention?
-export TORCH_EXTENSIONS_DIR=/tmp/ellenma/torch_extensions
-export CUDA_LAUNCH_BLOCKING=1
-export NCCL_P2P_DISABLE=1
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+# export TORCH_EXTENSIONS_DIR=/tmp/ellenma/torch_extensions
+# export CUDA_LAUNCH_BLOCKING=1
+# export NCCL_P2P_DISABLE=1
+# export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 deepspeed --module openrlhf.cli.train_sft \
    --max_len 512 \
-   --dataset /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/data/frozen_lake/frozen_lake_train.jsonl \
-   --eval_dataset /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/data/frozen_lake/frozen_lake_val.jsonl \
+   --dataset /n/holylfs06/LABS/sham_lab/Users/mkwun/AgentsOpenRLHF/data/frozen_lake/frozen_lake_train.jsonl \
+   --eval_dataset /n/holylfs06/LABS/sham_lab/Users/mkwun/AgentsOpenRLHF/data/frozen_lake/frozen_lake_val.jsonl \
    --input_key prompt \
    --output_key response \
    --pretrain Qwen/Qwen3-14B \
-   --save_path /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/openrlhf_artifacts/sft_qwen14 \
+   --save_path /n/holylfs06/LABS/sham_lab/Users/mkwun/AgentsOpenRLHF/openrlhf_artifacts/sft_qwen14 \
    --train_batch_size 8 \
    --micro_train_batch_size 1 \
    --max_samples 1000 \

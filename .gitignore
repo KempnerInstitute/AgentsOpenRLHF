@@ -149,3 +149,6 @@ core
 *jianh*
 *test_scripts*
 */checkpoint/*
+wandb/*
+run_logs/*
+openrlhf_artifacts/*
