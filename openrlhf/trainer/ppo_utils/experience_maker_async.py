@@ -125,9 +125,12 @@ class SamplesGeneratorAsync(SamplesGenerator):
             }
 
             # Process extra_logs
-            extra_logs = output.get("extra_logs", {})
-            for key, value in extra_logs.items():
-                info[key] = torch.tensor([value.item()])
+            # extra_logs = output.get("extra_logs", {})
+            # print("extra_logs:", extra_logs)
+            # print("Types:", {k: type(v) for k, v in extra_logs.items()})    
+            # for key, value in extra_logs.items():
+            #     # info[key] = torch.tensor([value.item()])
+            #     info[key] = torch.tensor([value])
 
             experience = Experience(
                 sequences=sequences.unsqueeze(0),
