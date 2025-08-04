@@ -14,25 +14,22 @@ class FrozenLakeAgentInstance(AgentInstanceBase):
     """Execute one step of verification and return a random reward using torch.rand
 
     Args:
-        observation: The input prompt/expression
-        action: The language model's response
-        label: Agent identifier or additional information
+        map_sizes: list of n for nxn map sizes
+        env: gym object 
 
     Returns:
         Dict[str, Any]: A dictionary containing:
-            - rewards: Reward value for advantage calculation
-            - scores: Reward value for dynamic filtering
-            - next_observation: The updated observation after the step
-            - done: Boolean indicating if the episode is complete
+            - rewards: np.array reward value for advantage calculation
+            - scores: np.array reward value for dynamic filtering
+            - next_observation: prompt for the next observation
+            - done: bool indicating if the episode is complete
             - sampling_params: Parameters for vLLM sampling
-            - extra_logs: Additional logging information
+            - extra_logs: Additional logging information    # this was giving me bugs wrt how it was being batched by experience_maker so i disabled for now
     """
     def __init__(self, *args, **kwargs):
         print("INITIALIZING GYM AGENT")
         self.map_sizes = [4,5,6,7,8]
-        # self.map_size = random.choice(map_sizes)
         self.env = None
-        # self.reset()
 
         self.action_name_to_id =  {
             "LEFT": 0,
@@ -59,10 +56,10 @@ class FrozenLakeAgentInstance(AgentInstanceBase):
         Returns:
             Dict[str, Any]: A dictionary containing the initial observation and a done flag.
         """
-        # Randomly select a map size for each episode
+        # Randomly select map size
         map_size = random.choice(self.map_sizes)
         
-        # Create a new environment instance with the chosen size
+        # Create a new environment instance 
         if self.env:
             self.env.close()
         self.env = gym.make('FrozenLake-v1', desc=generate_random_map(size=map_size), is_slippery=False, render_mode="ansi")
@@ -70,18 +67,17 @@ class FrozenLakeAgentInstance(AgentInstanceBase):
         # Reset the Gymnasium environment
         obs, info = self.env.reset(seed=random.randint(0, 10000))
         
-        # Format the initial observation for the LLM
+        # Format prompt with initial observation
         observation = make_prompt(env_to_str(self.env))
         
-        # We return the initial observation in the `observation` key
-        # states["observation"] = observation
         return {"next_observation": observation}
 
     async def step(self, observation, action, label, **kwargs) -> Dict[str, Any]:
+        # Get action from LLM response
         response = action
         env_action = self._parse_action(response)
 
-        if env_action is None:
+        if env_action is None:      # penalize invalid action
             return {
                 "rewards": np.array([-10.]),
                 "next_observation": "Invalid action. Episode terminated.",
@@ -90,21 +86,22 @@ class FrozenLakeAgentInstance(AgentInstanceBase):
                 "extra_logs": {"error": "Invalid action"}
             }
         
+        # Perform action in Gymnasium env
         obs, reward, terminated, truncated, info = self.env.step(env_action)
         done = terminated or truncated
 
+        # Format game state into prompt
         env_str = env_to_str(self.env)
         environment_feedback = make_prompt(env_str)
 
         return {
-            # "rewards": torch.tensor(reward),
             "rewards": np.array([reward]),
-            # "scores": torch.tensor(reward),
             "scores": np.array([reward]),
             "next_observation": environment_feedback,
             "done": done, 
             "extra_logs": info
         }
+
 def _extract_grid_from_prompt(prompt: str) -> List[List[str]]:
     """Extract grid from prompt text"""
     try:
@@ -114,20 +111,20 @@ def _extract_grid_from_prompt(prompt: str) -> List[List[str]]:
         else:
             raise ValueError("No Grid: section found in prompt")
 
-        # Stop at the next question
         if "What action" in grid_section:
             grid_section = grid_section.split("What action")[0]
 
         grid_section = grid_section.strip()
         lines = [line.strip() for line in grid_section.split("\n") if line.strip()]
 
+        # Parse map
         grid = []
         for line in lines:
             if " " in line:  # Grid rows should have spaces between cells
                 row = line.split()
                 if row and all(
                     cell in ["S", "F", "H", "G", "@"] for cell in row
-                ):  # Valid symbols
+                ):  # Valid symbols check
                     grid.append(row)
 
         # Validate grid is square and not empty
@@ -170,7 +167,7 @@ def env_to_str(env):
         row_str = " ".join([char.decode('utf-8') for char in row_bytes])
         grid.append(row_str)
     grid_str = "\n".join([row for row in grid])
-    return grid 
+    return grid_str
 
 _agent_instance = FrozenLakeAgentInstance()
 
@@ -178,6 +175,7 @@ async def reset(states: dict, **kwargs):
     return await _agent_instance.reset(states, **kwargs)
 
 async def step(observation, action, label, **kwargs):
+    # If new map make new env 
     if _agent_instance.env is None:
         grid_str = _extract_grid_from_prompt(observation)
         _agent_instance.env = _create_gym_env_from_grid(grid_str)
