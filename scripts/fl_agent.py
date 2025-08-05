@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from scripts.fl_datagen import make_prompt
 from openrlhf.utils.agent import AgentInstanceBase
 from gymnasium.envs.toy_text.frozen_lake import generate_random_map
+from scripts.fl_evaluator import FrozenLakeEvaluator
 
 
 class FrozenLakeAgentInstance(AgentInstanceBase):
@@ -26,11 +27,10 @@ class FrozenLakeAgentInstance(AgentInstanceBase):
             - sampling_params: Parameters for vLLM sampling
             - extra_logs: Additional logging information    # this was giving me bugs wrt how it was being batched by experience_maker so i disabled for now
     """
-    def __init__(self, *args, **kwargs):
-        print("INITIALIZING GYM AGENT")
+    def __init__(self, interactive=False, *args, **kwargs):
         self.map_sizes = [4,5,6,7,8]
         self.env = None
-
+        self.interactive = interactive
         self.action_name_to_id =  {
             "LEFT": 0,
             "DOWN": 1,
@@ -45,62 +45,65 @@ class FrozenLakeAgentInstance(AgentInstanceBase):
             action_name = match.group(1).strip().upper()
             return self.action_name_to_id.get(action_name)
         return None
-    
-    async def reset(self, **kwargs) -> Dict[str, Any]:
-        """
-        Resets the environment to its initial state and generates the first prompt.
-        
-        Args:
-            states (dict): The initial states from the executor.
 
-        Returns:
-            Dict[str, Any]: A dictionary containing the initial observation and a done flag.
-        """
-        # Randomly select map size
-        map_size = random.choice(self.map_sizes)
-        
-        # Create a new environment instance 
-        if self.env:
-            self.env.close()
-        self.env = gym.make('FrozenLake-v1', desc=generate_random_map(size=map_size), is_slippery=False, render_mode="ansi")
-        
-        # Reset the Gymnasium environment
-        obs, info = self.env.reset(seed=random.randint(0, 10000))
-        
-        # Format prompt with initial observation
-        observation = make_prompt(env_to_str(self.env))
-        
-        return {"next_observation": observation}
+    def _parse_full_trajectory(self, response: str) -> tuple:
+        """Take full reasoning trajectory and return Tuple(end_state: Gym env, reward: bool)"""
+        multistep_eval = FrozenLakeEvaluator()
+        traj = multistep_eval._extract_reasoning(response)
+        actions = multistep_eval._extract_action_sequence(traj)
+        end = multistep_eval._simulate_path(env_to_list(self.env), actions)
+        reward = end["reward"]
+        end_state = end["state"]
+        return end_state, reward 
 
     async def step(self, observation, action, label, **kwargs) -> Dict[str, Any]:
         # Get action from LLM response
         response = action
-        env_action = self._parse_action(response)
+        if self.interactive:
+            env_action = self._parse_action(response)
 
-        if env_action is None:      # penalize invalid action
+            if env_action is None:      # penalize invalid action
+                return {
+                    "rewards": np.array([0.]),
+                    "next_observation": "Invalid action. Episode terminated.",
+                    "done": True,
+                    "scores": np.array([0.]),
+                    "extra_logs": {"error": "Invalid action"}
+                }
+            
+            # Perform action in Gymnasium env
+            obs, reward, terminated, truncated, info = self.env.step(env_action)
+            done = terminated or truncated
+
+            # Format game state into prompt
+            env_str = env_to_str(self.env)
+            environment_feedback = make_prompt(env_str)
+
             return {
-                "rewards": np.array([-10.]),
-                "next_observation": "Invalid action. Episode terminated.",
-                "done": True,
-                "scores": np.array([-10.]),
-                "extra_logs": {"error": "Invalid action"}
+                "rewards": np.array([reward]),
+                "scores": np.array([reward]),
+                "next_observation": environment_feedback,
+                "done": done, 
+                "extra_logs": info
             }
-        
-        # Perform action in Gymnasium env
-        obs, reward, terminated, truncated, info = self.env.step(env_action)
-        done = terminated or truncated
 
-        # Format game state into prompt
-        env_str = env_to_str(self.env)
-        environment_feedback = make_prompt(env_str)
+        else:
+            print("parsing full trajectory from model response (evaluating non-interactively)")
+            end_state, goal = self._parse_full_trajectory(response)
+            end_str = env_to_str(end_state)
+            env_feedback = make_prompt(end_str)
+            if goal is True:
+                reward = 1.0
+            else:
+                reward = 0.0
+            return {
+                "rewards": np.array([reward]),
+                "scores": np.array([reward]),
+                "next_observation": env_feedback,
+                "done": True, 
+                "extra_logs": None
+            }
 
-        return {
-            "rewards": np.array([reward]),
-            "scores": np.array([reward]),
-            "next_observation": environment_feedback,
-            "done": done, 
-            "extra_logs": info
-        }
 
 def _extract_grid_from_prompt(prompt: str) -> List[List[str]]:
     """Extract grid from prompt text"""
@@ -169,10 +172,16 @@ def env_to_str(env):
     grid_str = "\n".join([row for row in grid])
     return grid_str
 
-_agent_instance = FrozenLakeAgentInstance()
+def env_to_list(env):
+    grid_bytes = env.unwrapped.desc
+    grid = []
+    for row_bytes in grid_bytes:
+        # row_str = " ".join([char.decode('utf-8') for char in row_bytes])
+        row = [char.decode('utf-8') for char in row_bytes]
+        grid.append(row)
+    return grid 
 
-async def reset(states: dict, **kwargs):
-    return await _agent_instance.reset(states, **kwargs)
+_agent_instance = FrozenLakeAgentInstance()
 
 async def step(observation, action, label, **kwargs):
     # If new map make new env 
