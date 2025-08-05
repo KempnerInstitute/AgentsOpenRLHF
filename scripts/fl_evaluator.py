@@ -48,7 +48,7 @@ class FrozenLakeEvaluator:
                 grid = self._extract_grid_from_prompt(prompt)
 
                 # Simulate the path
-                success = self._simulate_path(grid, actions)
+                success = self._simulate_path(grid, actions)["reward"]
 
                 results["successful_paths"] += int(success)
                 results["total_paths"] += 1
@@ -75,7 +75,7 @@ class FrozenLakeEvaluator:
             except Exception as e:
                 results["action_path"].append(f"Map {i}: Error - {str(e)}")
                 results["individual_results"]["unknown"].append(0)
-                results["total_paths"] += 1  # Still count failed attempts
+                results["total_paths"] += 1  
                 continue
 
         results["success_rate"] = (
@@ -175,9 +175,6 @@ class FrozenLakeEvaluator:
 
     def _simulate_path(self, grid: List[List[str]], actions: List[int]) -> bool:
         """Simulate the action sequence on the grid and check if goal is reached"""
-        if not grid or not actions:
-            return False
-
         try:
             # Create gym environment from grid
             env = self._create_gym_env_from_grid(grid)
@@ -185,24 +182,25 @@ class FrozenLakeEvaluator:
             state = env.reset()
             if isinstance(state, tuple):
                 state = state[0]
+            end_env = env
 
             for action in actions:
                 if action not in [0, 1, 2, 3]:  # Valid gym actions
                     env.close()
-                    return False
+                    return {"state": end_env, "reward": False}
 
                 state, reward, done, truncated, info = env.step(action)
-
+                end_env = env
                 if done:
                     env.close()
-                    return reward > 0  # Success if reward > 0 (reached goal)
+                    return {"state": end_env, "reward": reward > 0} # Success if reward > 0 (reached goal)
 
             env.close()
-            return False  # Didn't finish/reach goal
+            return {"state": end_env, "reward": False}  # Didn't finish/reach goal
 
         except Exception as e:
             print(f"Simulation error: {e}")
-            return False
+            return {"state": None, "reward": False}
 
     def _create_gym_env_from_grid(self, grid: List[List[str]]):
         """Create gym environment from grid (using S, F, H, G format)"""
