@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name="rl_06flake"
+#SBATCH --job-name="rl_8flake"
 #SBATCH --account=kempner_undergrads
-#SBATCH --output /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/rl_run_logs/06_%A.log
-#SBATCH --error /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/rl_run_logs/06_error_%j.out
+#SBATCH --output /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/rl_run_logs/8_%A.log
+#SBATCH --error /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/rl_run_logs/8_error_%j.out
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=128GB
-#SBATCH --time=15:00:00
-#SBATCH --partition=kempner
+#SBATCH --mem=256GB
+#SBATCH --time=30:00:00
+#SBATCH --partition=kempner_h100
 
 module purge
 
@@ -93,20 +93,20 @@ srun --overlap -N 1 -n 1 -w "$head_node" ray job submit --address="http://127.0.
   --colocate_actor_ref \
   --actor_num_nodes 1 \
   --actor_num_gpus_per_node 1 \
-  --pretrain /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/openrlhf_artifacts/sft_qwen06 \
-  --save_path /n/netscratch/kempner_undergrads/Lab/ellenma/openrlhf_artifacts/frozenlake_rl/ \
+  --pretrain /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/openrlhf_artifacts/sft_qwen8 \
+  --save_path /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/openrlhf_artifacts/frozenlake_rl/rl_ftqwen8 \
   --vllm_num_engines 1 \
   --vllm_tensor_parallel_size 1 \
   --micro_train_batch_size 2 \
   --train_batch_size 32 \
   --micro_rollout_batch_size 4 \
   --rollout_batch_size 16 \
-  --max_samples 50000 \
+  --max_samples 1000 \
   --max_epochs 3 \
   --num_episodes 10 \
   --prompt_max_len 1536 \
   --generate_max_len 512 \
-  --n_samples_per_prompt 4 \
+  --n_samples_per_prompt 8 \
   --zero_stage 2 \
   --bf16 \
   --actor_learning_rate 5e-7 \
@@ -119,9 +119,9 @@ srun --overlap -N 1 -n 1 -w "$head_node" ray job submit --address="http://127.0.
   --gradient_checkpointing \
   --use_wandb True \
   --wandb_project frozenlake_rl \
-  --wandb_run_name sft_06B \
-  --agent_func_path /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/scripts/gym_agent.py \
-  --prompt_data /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/data/frozen_lake/rl_dataset.jsonl \
+  --wandb_run_name sft_8B \
+  --agent_func_path /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/scripts/fl_agent.py \
+  --prompt_data /n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/data/frozen_lake/rl_train.jsonl \
   --input_key prompt \
   --async_train \
 
