@@ -1,7 +1,5 @@
 import gymnasium as gym
 import numpy as np
-import torch
-import random
 import re
 from typing import Any, Dict, List
 
@@ -78,7 +76,7 @@ class FrozenLakeAgentInstance(AgentInstanceBase):
             # Format game state into prompt
             env_str = env_to_str(self.env)
             environment_feedback = make_prompt(env_str)
-
+            
             return {
                 "rewards": np.array([reward]),
                 "scores": np.array([reward]),
@@ -92,14 +90,16 @@ class FrozenLakeAgentInstance(AgentInstanceBase):
             end_state, goal = self._parse_full_trajectory(response)
             end_str = env_to_str(end_state)
             env_feedback = make_prompt(end_str)
+            
             if goal is True:
                 reward = 1.0
             else:
                 reward = 0.0
+                print(f"\nenv feedback for next observation \n {env_feedback}\n (over)")
             return {
                 "rewards": np.array([reward]),
                 "scores": np.array([reward]),
-                "next_observation": env_feedback,
+                "next_observation": observation + action + env_feedback,
                 "done": True, 
                 "extra_logs": None
             }
