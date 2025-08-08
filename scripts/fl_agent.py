@@ -99,7 +99,8 @@ class FrozenLakeAgentInstance(AgentInstanceBase):
             return {
                 "rewards": np.array([reward]),
                 "scores": np.array([reward]),
-                "next_observation": observation + action + env_feedback,
+                # "next_observation": observation + action + env_feedback,
+                "next_observation": observation + action,
                 "done": True, 
                 "extra_logs": None
             }
