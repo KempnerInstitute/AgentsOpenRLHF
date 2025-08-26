@@ -4,19 +4,16 @@ import numpy as np
 import re
 from typing import Any, Dict, List
 
-from scripts.fl_datagen import make_prompt
-from openrlhf.utils.agent import AgentInstanceBase
-from scripts.fl_evaluator import FrozenLakeEvaluator
 from scripts.simulator import Simulator
 
-def make_prompt_sim(end_str, init_str):
-    # TODO edit this 
+def make_prompt(str_representation):
     return f"""
-after simulating, the grid becomes:
-{end_str}
-currently the grid is still 
-{init_str}
-Commit or simulate?
+Grid:
+{str_representation}
+
+What action should you take next? Decide to simulate or commit actions. 
+If simulating, output <simulate> [your answers] </simulate>
+If committing, output <answer> [your answer] </answer>
 """
 
 class FrozenLakeAgentInstanceTool():
@@ -43,6 +40,13 @@ class FrozenLakeAgentInstanceTool():
             "RIGHT": 2,
             "UP": 3
         }
+        self.action_id_to_name = {
+            0: "Left",
+            1: "Down",
+            2: "Right",
+            3: "Up"
+        }
+        self.n_sim = 0
 
     def _parse_action(self, response: str):
         """Return single committed action"""
@@ -57,40 +61,69 @@ class FrozenLakeAgentInstanceTool():
         if "<simulate>" in response:
             return True
         return False
-
-    def _parse_full_trajectory(self, response: str) -> tuple:
-        """Take full reasoning trajectory and return Tuple(end_state: Gym env, reward: bool)"""
-        multistep_eval = FrozenLakeEvaluator()
-        traj = multistep_eval._extract_reasoning(response)
-        actions = multistep_eval._extract_action_sequence(traj)
-        end = multistep_eval._simulate_path(env_to_list(self.env), actions)
-        reward = end["reward"]
-        end_state = end["state"]
-        return end_state, reward 
     
-    def _parse_sim_actions(self, response: str) -> list[str]:
+    def _parse_sim_actions(self, response: str) -> list[int]:
         """Return list of actions to simulate"""
-        match = re.search(r"<simulate>\s*(\w+)\s*</simulate>", response, re.IGNORECASE)
+        match = re.search(r"<simulate>\s*(.*?)\s*</simulate>", response, re.IGNORECASE)
         actions = []
         if match:
-            action_name = match.group(1).strip().upper()
-            actions.append(self.action_name_to_id.get(action_name))
+            actions = match.group(1).split()
+            actions = [self.action_name_to_id.get(act.upper()) for act in actions]
         return actions
+    
+    def make_prompt_sim(self, end_str, init_str, actions, actions_simulated, reward):
+        actions_sim_str = [self.action_id_to_name.get(action_id) for action_id in actions_simulated]
+        actions_str = [self.action_id_to_name.get(action_id) for action_id in actions]
+        if actions == actions_simulated:
+            return f"""
+        X reached hole (H) | * reached goal (G)
+        After simulating {" ".join(actions_str)}, a reward of {reward} was obtained and the grid becomes:
+        {end_str}
+        The true state of the grid is still:
+        {init_str}
+        What action should you take next? Decide to simulate or commit actions. 
+        If simulating, output <simulate> [your answers] </simulate>
+        If committing, output <answer> [your answer] </answer>
+        """
+        else:
+            return f"""
+        After simulating {" ".join(actions_sim_str)}, a reward of {reward} was obtained and the grid becomes:
+        {end_str}
+        
+        The true state of the grid is still:
+        {init_str}
+        What action should you take next? Decide to simulate or commit actions. 
+        If simulating, output <simulate> [your answers] </simulate>
+        If committing, output <answer> [your answer] </answer>
+        """
 
     async def step(self, observation, response, label, **kwargs) -> Dict[str, Any]:
         tool_use = self._parse_tool(response)
         
         if tool_use:
+            self.n_sim+=1
             actions = self._parse_sim_actions(response)
-            simulator = Simulator(self.env_str, "frozenlake", actions, return_intermed_states=False)
-            end_state, initial_state = simulator.simulate()
-            end_str, reward, info = end_state[-1]
-            next_prompt = make_prompt_sim(end_str, initial_state) # TODO: change this to be end string of simulation and initial env string to "return" to actual state 
+            simulator = Simulator(env=self.env_str, env_type="frozenlake", actions=actions, strict=False, return_intermed_states=False)
+            end_state, initial_state = simulator.simulate() 
+            end_str, reward, actions_simulated = end_state
+            
+            next_prompt = self.make_prompt_sim(end_str, initial_state, actions, actions_simulated, reward) 
+            
+            if self.n_sim == 1000:
+                return {
+                "rewards": np.array([0.]),
+                "next_observation": observation + response + "Number of allotted simulations reached. Episode terminated.",
+                "done": False,
+                "scores": np.array([0.]),
+                "extra_logs": self.n_sim
+            }
+            
             return {
-                "rewards": np.array([reward]),
+                "rewards": np.array([0.]),
                 "next_observation": observation + response + next_prompt,
                 "done": False,
-                "scores": np.array([reward])
+                "scores": np.array([0.]),
+                "extra_logs": self.n_sim
             }
             
         else: 
@@ -102,33 +135,57 @@ class FrozenLakeAgentInstanceTool():
                     "next_observation": observation + response + "Invalid action. Episode terminated.",
                     "done": True,
                     "scores": np.array([0.]),
+                    "extra_logs": self.n_sim
                 }
             
             obs, reward, terminated, truncated, info = self.env.step(env_action)
             done = terminated or truncated
+            if done:
+                return {
+                    "rewards": np.array([reward]),
+                    "scores": np.array([reward]),
+                    "next_observation": observation+response,
+                    "done": done, 
+                    "extra_logs": self.n_sim
+                }
             
-            env_str = env_to_str(self.env)
-            next_prompt = make_prompt(env_str) # TODO: change make_prompt function to the simulate or commit thing and figure out how to formulate 
+            env_flat_list = self.env_str.split()
+            env_list = env_to_list(self.env)
+            init_obs = env_flat_list.index('S')
+            size = len(env_list)
+            init_x, init_y = init_obs // size, init_obs % size
+            env_list[init_x][init_y] = 'F'
+            x,y = obs//size, obs%size 
+            env_list[x][y] = 'S'
+            env_str = '\n'.join(' '.join(row) for row in env_list)
+            next_prompt = make_prompt(env_str) 
+            
             return {
                 "rewards": np.array([reward]),
                 "scores": np.array([reward]),
                 "next_observation": observation+response+next_prompt,
                 "done": done, 
-                "extra_logs": info
+                "extra_logs": self.n_sim
             }
 
 
 def _extract_grid_from_prompt(prompt: str) -> List[List[str]]:
     """Extract grid from prompt text"""
     try:
-        # Find the grid section
-        if "Grid:" in prompt:
+        # Find grid section
+        if "the grid becomes:" in prompt:
+            grid_section = prompt.split("the grid becomes:")[1]
+        
+            if "The true state" in prompt:
+                grid_section = grid_section.split("The true state")[0]
+
+        elif "Grid:" in prompt:
             grid_section = prompt.split("Grid:")[1]
+            if "What action" in grid_section:
+                grid_section = grid_section.split("What action")[0]
         else:
             raise ValueError("No Grid: section found in prompt")
 
-        if "What action" in grid_section:
-            grid_section = grid_section.split("What action")[0]
 
         grid_section = grid_section.strip()
         lines = [line.strip() for line in grid_section.split("\n") if line.strip()]
@@ -189,7 +246,6 @@ def env_to_list(env):
     grid_bytes = env.unwrapped.desc
     grid = []
     for row_bytes in grid_bytes:
-        # row_str = " ".join([char.decode('utf-8') for char in row_bytes])
         row = [char.decode('utf-8') for char in row_bytes]
         grid.append(row)
     return grid 
@@ -198,8 +254,9 @@ _agent_instance = FrozenLakeAgentInstanceTool()
 
 async def step(observation, action, label, **kwargs):
     if _agent_instance.env is None:
-        grid_str = _extract_grid_from_prompt(observation)
-        _agent_instance.env_str = grid_str
-        _agent_instance.env = _create_gym_env_from_grid(grid_str)
+        grid_list = _extract_grid_from_prompt(observation)
+        _agent_instance.env_str = '\n'.join([' '.join(row) for row in grid_list])
+        _agent_instance.env = _create_gym_env_from_grid(grid_list)
         _agent_instance.env.reset()
+        _agent_instance.n_sim = 0
     return await _agent_instance.step(observation, action, label, **kwargs)
