@@ -1,5 +1,8 @@
+from datetime import datetime
+from pathlib import Path
 from typing import List
 
+import json
 import ray
 import torch
 
@@ -9,6 +12,8 @@ from openrlhf.trainer.ppo_utils.experience_maker import Experience, SamplesGener
 class SamplesGeneratorAsync(SamplesGenerator):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        if not hasattr(self, 'trace_log_file'):
+            self.trace_log_file = setup_trace_logging()
 
     def _generate_vllm(self, all_prompts: List[str], all_labels, **kwargs) -> List[Experience]:
         from vllm import SamplingParams
@@ -92,6 +97,7 @@ class SamplesGeneratorAsync(SamplesGenerator):
                 )["input_ids"][0]
                 # Calculate token indices
                 tokenized_ranges.append((len(start_tokens), len(full_tokens)))
+
             if observation_tokens[-1] != eos_token_id:
                 tokenized_ranges[-1] = (tokenized_ranges[-1][0], tokenized_ranges[-1][1] + 1)
 
@@ -116,12 +122,27 @@ class SamplesGeneratorAsync(SamplesGenerator):
             total_length = attention_mask.float().sum()
             is_clipped = total_length >= truncate_length
 
+            raw_obs = output.get("observation","")
+            rewards = output["reward"]
+            
+            trace_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "raw_observation": raw_obs,
+                "reward": rewards,
+                "n_sim": output["extra_logs"],
+                "label": output.get("label","")
+            }
+            
+            with open(self.trace_log_file, 'a') as f:
+                f.write(json.dumps(trace_entry) + '\n')
+                
             info = {
                 "response_length": torch.tensor([response_length]),
                 "total_length": torch.tensor([total_length]),
                 "response_clip_ratio": torch.tensor([is_clipped]),
                 "reward": torch.tensor([output["reward"]]),
                 "score": torch.tensor([output["scores"]]),
+                # "_raw_obs": [output.get("observation","")]
             }
 
             # Process extra_logs
@@ -145,3 +166,9 @@ class SamplesGeneratorAsync(SamplesGenerator):
             experiences_list.append(experience)
 
         return experiences_list
+    
+def setup_trace_logging(log_dir="/n/holylfs06/LABS/kempner_undergrads/Lab/ellenma/openrlhf-proj/AgentsOpenRLHF/full_trace_logs"):
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = f"{log_dir}/traces_{timestamp}.jsonl"
+    return log_file
