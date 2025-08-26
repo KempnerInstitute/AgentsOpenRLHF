@@ -173,14 +173,15 @@ def _extract_grid_from_prompt(prompt: str) -> List[List[str]]:
     """Extract grid from prompt text"""
     try:
         # Find grid section
-        if "the grid becomes:" in prompt:
+        if "grid is still:" in prompt:
             grid_section = prompt.split("the grid becomes:")[1]
         
-            if "The true state" in prompt:
-                grid_section = grid_section.split("The true state")[0]
+            if "What action" in prompt:
+                grid_section = grid_section.split("What action")[0]
 
         elif "Grid:" in prompt:
             grid_section = prompt.split("Grid:")[1]
+            
             if "What action" in grid_section:
                 grid_section = grid_section.split("What action")[0]
         else:
