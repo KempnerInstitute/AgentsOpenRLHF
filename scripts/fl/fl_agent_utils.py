@@ -165,6 +165,54 @@ def parse_sim_actions(response: str) -> list[int]:
     # Filter out unknowns
     return [a for a in actions if a is not None]
 
+def make_prompt_no_tool(env_str):
+    assert_valid(env_str)
+    return f"""
+Grid:
+{env_str}
+
+What action should you take next?
+Decide the next action:
+Always output: <answer> [your answer] </answer> with no extra text.
+Strictly follow this format. <|im_end|>
+<|im_start|>assistant
+<think>
+"""
+
+def make_prompt(env_str):
+    assert_valid(env_str)
+    return f"""<|im_start|>user
+You are walking on a frozen lake.
+
+FrozenLake Quick Guide
+Goal: Reach the goal (G)
+
+Symbols:
+S Start | F Frozen | H Hole | G Goal
+
+Rules:
+- Avoid falling into holes (H)
+- Frozen tiles are slippery
+
+Answers:
+<answer> Up </answer> | <answer> Down </answer> | <answer> Left </answer> | <answer> Right </answer>
+
+Rewards:
+Fall into hole: 0
+Reach goal: +1.0
+
+Grid:
+{env_str}
+
+What action should you take next?
+
+Decide the next action:
+Always output: <answer> [your answer] </answer> with no extra text.
+Strictly follow this format. <|im_end|>
+<|im_start|>assistant
+<think>"""
+
+    
 def make_prompt_sim(end_str, init_str, actions, actions_simulated, reward):
     actions_sim_str = [action_id_to_name.get(action_id) for action_id in actions_simulated]
     actions_str = [action_id_to_name.get(action_id) for action_id in actions]
