@@ -1,41 +1,5 @@
-import multiprocessing as mp
 import gymnasium as gym 
-from concurrent.futures import ProcessPoolExecutor
-
-def assert_valid(grid):
-    if isinstance(grid, str):
-        flat = grid.split()
-        
-    elif isinstance(grid, list):
-        flat = [tile for row in grid for tile in row]
-    else:
-        raise TypeError(f"got {type(grid).__name__}. need str or list of lists")
-        
-    player_count = sum(t in ('S','X','*') for t in flat)
-    goal_count   = sum(t in ('G','*') for t in flat)
-    assert player_count == 1, f"invalid player markers: {player_count}"
-    assert goal_count   == 1, f"invalid goal markers: {goal_count}"
-    
-def assert_valid_for_env(grid):
-    if isinstance(grid, str):
-        flat = grid.split()
-        
-    elif isinstance(grid, list):
-        flat = [tile for row in grid for tile in row]
-    else:
-        raise TypeError(f"got {type(grid).__name__}. need str or list of lists")
-        
-    player_count = sum(t == 'S' for t in flat)
-    goal_count   = sum(t == 'G' for t in flat)
-    assert player_count == 1, f"invalid player markers: {player_count}"
-    assert goal_count   == 1, f"invalid goal markers: {goal_count}"
-
-
-def str_to_grid_list(string):
-    return [row.split() for row in string.split('\n')]
-
-def grid_list_to_str(grid_list):
-    return '\n'.join(' '.join(row) for row in grid_list)
+import scripts.fl as fl 
     
 class FrozenLakeSimulator:
     def __init__(self, init_str, actions, strict):
@@ -43,9 +7,7 @@ class FrozenLakeSimulator:
         self.actions = actions
         self.strict = strict 
         
-        # store current state as a nested list of tiles
-        self.curr_state = str_to_grid_list(init_str)
-        self.size = len(self.curr_state)
+        self.size = len(fl.str_to_grid_list(init_str))
         
         # store poisitions as tuple (x,y)
         self.init_pos = self.get_s_pos(init_str)
@@ -61,9 +23,38 @@ class FrozenLakeSimulator:
         
         # gym env object
         self.env = None
-    
+        
+    def assert_valid(self, grid):
+        """assert there is 1 player tile and 1 goal tile in grid"""
+        if isinstance(grid, str):
+            flat = grid.split()
+            
+        elif isinstance(grid, list):
+            flat = [tile for row in grid for tile in row]
+        else:
+            raise TypeError(f"got {type(grid).__name__}. need str or list of lists")
+            
+        player_count = sum(t in ('S','X','*') for t in flat)
+        goal_count   = sum(t in ('G','*') for t in flat)
+        assert player_count == 1, f"invalid player markers: {grid} \n initial str: {self.init_str} \n actions: {self.actions}"
+        assert goal_count   == 1, f"invalid goal markers: {grid} \n initial str: {self.init_str} \n actions: {self.actions}"
+        
+    def assert_valid_for_env(self, grid):
+        if isinstance(grid, str):
+            flat = grid.split()
+            
+        elif isinstance(grid, list):
+            flat = [tile for row in grid for tile in row]
+        else:
+            raise TypeError(f"got {type(grid).__name__}. need str or list of lists")
+            
+        player_count = sum(t == 'S' for t in flat)
+        goal_count   = sum(t == 'G' for t in flat)
+        assert player_count == 1, f"invalid player markers: {grid} \n initial str: {self.init_str} \n actions: {self.actions}"
+        assert goal_count   == 1, f"invalid goal markers: {grid} \n initial str: {self.init_str} \n actions: {self.actions}"
+        
     def obs_to_coords(self, obs):
-        return obs // self.size, obs % self.size 
+        return divmod(obs, self.size)
     
     def get_s_pos(self, grid):
         if isinstance(grid, str):
@@ -74,27 +65,38 @@ class FrozenLakeSimulator:
         return self.obs_to_coords(init_obs)
     
     def _create_env_from_str(self, state: str):
+        self.assert_valid_for_env(state)
         self.init_pos = self.get_s_pos(state)
         desc = [list(line.replace(" ","")) for line in state.split("\n")]
         self.env = gym.make("FrozenLake-v1", desc=desc, is_slippery=False)
         self.env.reset()
     
     def render_end_pos(self):
-        # replace old S from self.init pos as F ]
-        x0,y0 = self.init_pos
-        self.curr_state[x0][y0] = 'F'
+        grid = fl.str_to_grid_list(self.init_str)
         
-        # put in S, X, or * using self.curr_pos and self.init_str
-        x,y = self.curr_pos
-        end_tile = self.curr_state[x][y]
-        if end_tile == 'F': self.curr_state[x][y] = 'S'
-        elif end_tile == 'H': self.curr_state[x][y] = 'X'
-        elif end_tile == 'G': self.curr_state[x][y] = '*'
-        
-        # assert valid state
-        end_str = grid_list_to_str(self.curr_state)
-        assert_valid(end_str)
-        
+        # replace old S from self.init pos as F 
+        rS,cS = self.init_pos
+        rE,cE = self.curr_pos
+
+        # find goal in immutable terrain
+        flat = self.init_str.split()
+        g_idx = flat.index('G')
+        n = self.size
+        rG, cG = divmod(g_idx, n)
+
+        if (rE,cE) != (rS,cS) and grid[rS][cS] == 'S':
+            grid[rS][cS] = 'F'
+
+        tile = grid[rE][cE]
+        if tile == 'G':
+            grid[rE][cE] = '*'
+        elif tile == 'H':
+            grid[rE][cE] = 'X'; grid[rG][cG] = 'G'
+        else:
+            grid[rE][cE] = 'S'; grid[rG][cG] = 'G'
+
+        end_str = fl.grid_list_to_str(grid)
+        self.assert_valid(end_str)
         return end_str
     
     def clamp(self, pos):
@@ -169,7 +171,7 @@ class FrozenLakeSimulator:
                     # case where stepped off goal and done is False
                     x, y = self.curr_pos 
                     
-                    # re-set S in env
+                    # re-set S in env 
                     self.env.unwrapped.s = x*self.size + y
                 else:
                     # end simulation
