@@ -31,16 +31,6 @@ def assert_valid(grid):
     goal_count   = sum(t in ('G','*') for t in flat)
     assert player_count == 1, f"invalid player markers: {grid}"
     assert goal_count   == 1, f"invalid goal markers: {grid}"
-    
-def make_prompt(str_representation):
-    return f"""
-Grid:
-{str_representation}
-
-What action should you take next? Decide to simulate or commit actions. 
-If simulating, output <simulate> [your answers] </simulate>
-If committing, output <answer> [your answer] </answer>
-"""
 
 def create_gym_env_from_grid(grid: List[List[str]]):
     """Create gym environment from grid (using S, F, H, G format)"""
@@ -122,13 +112,13 @@ def extract_grid_from_prompt(
     
     return grid
 
-def parse_action(self, response: str):
+def parse_action(response: str):
     """Return single committed action"""
     match = list(re.finditer(r"<answer>\s*(\w+)\s*</answer>", response, re.IGNORECASE))
     if match:
         match = match[-1]
         action_name = match.group(1).strip().upper()
-        return self.action_name_to_id.get(action_name)
+        return action_name_to_id.get(action_name)
     return None
 
 
@@ -140,16 +130,6 @@ def parse_tool(response: str) -> bool:
     if last_word.endswith("</simulate>"):
         return True
     return False
-
-def parse_full_trajectory(self, response: str) -> tuple:
-        """Take full reasoning trajectory and return Tuple(end_state: Gym env, reward: bool)"""
-        multistep_eval = FrozenLakeEvaluator()
-        traj = multistep_eval._extract_reasoning(response)
-        actions = multistep_eval._extract_action_sequence(traj)
-        end = multistep_eval._simulate_path(env_to_list(self.env), actions)
-        reward = end["reward"]
-        end_state = end["state"]
-        return end_state, reward 
 
 def parse_sim_actions(response: str) -> list[int]:
     """Return action names from the last <simulate>...</simulate> block (no ID mapping)."""
@@ -226,6 +206,8 @@ def make_prompt_sim(end_str, init_str, actions, actions_simulated, reward):
     What action should you take next? Decide to simulate or commit actions. 
     If simulating, output <simulate> [your answers] </simulate>
     If committing, output <answer> [your answer] </answer>
+    <|im_start|>assistant
+    <think>
     """
     else:
         return f"""
@@ -237,6 +219,8 @@ def make_prompt_sim(end_str, init_str, actions, actions_simulated, reward):
     What action should you take next? Decide to simulate or commit actions. 
     If simulating, output <simulate> [your answers] </simulate>
     If committing, output <answer> [your answer] </answer>
+    <|im_start|>assistant
+    <think>
     """
     
 def str_to_grid_list(string):
