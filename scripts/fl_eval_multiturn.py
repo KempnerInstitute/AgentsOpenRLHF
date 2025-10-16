@@ -5,7 +5,7 @@ import json
 import numpy as np
 import torch
 from collections import defaultdict
-from scripts.fl_agent_multiturn import FrozenLakeAgentInstance
+from scripts.fl_agent_tool import FrozenLakeAgentInstanceTool
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 import scripts.fl as fl 
@@ -57,7 +57,8 @@ def generate_multiturn_responses(model, tokenizer, test_file, output_file, model
         for p in init_prompts:
             grid = fl.extract_grid_from_prompt(p)
             map_sizes.append(len(grid))
-            agent = FrozenLakeAgentInstance()
+            agent = FrozenLakeAgentInstanceTool()
+            agent.env_str = fl.grid_list_to_str(grid)
             agent.env = fl.create_gym_env_from_grid(grid)
             agent.env.reset()
             agents.append(agent)
@@ -80,7 +81,7 @@ def generate_multiturn_responses(model, tokenizer, test_file, output_file, model
 
             # tokenize/generate only for alive episodes
             inputs = tokenizer([curr_prompts[i] for i in alive],
-                               return_tensors="pt", padding=True, truncation=True).to(model.device)
+                               return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 outputs = model.generate(
                     **inputs,
@@ -91,12 +92,18 @@ def generate_multiturn_responses(model, tokenizer, test_file, output_file, model
                     use_cache=True
                 )
             
-            # left padding: same input length for all rows
-            pad_len = inputs['input_ids'].shape[1]
+            # # left padding: same input length for all rows
+            # pad_len = inputs['input_ids'].shape[1]
 
-            # decode model responses
+            # # decode model responses
+            # resp_texts = [
+            #     tokenizer.decode(outputs[k][pad_len:], skip_special_tokens=True).strip()
+            #     for k in range(len(alive))
+            # ]
+            
+            input_lens = inputs["attention_mask"].sum(dim=1).tolist()
             resp_texts = [
-                tokenizer.decode(outputs[k][pad_len:], skip_special_tokens=True).strip()
+                tokenizer.decode(outputs[k][int(input_lens[k]):], skip_special_tokens=True).strip()
                 for k in range(len(alive))
             ]
             
@@ -110,7 +117,7 @@ def generate_multiturn_responses(model, tokenizer, test_file, output_file, model
                 
                 # log turn 
                 turns[i].append({"prompt": curr_prompts[i], "response": resp_text})
-                histories[i] += resp_text + "\n<|im_end|>\n"
+                histories[i] += resp_text
                 steps[i] += 1
                 
                 if bool(res.get("done", False)):
