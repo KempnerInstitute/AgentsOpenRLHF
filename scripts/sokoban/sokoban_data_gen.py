@@ -21,6 +21,7 @@ from .sokoban_constants import (
     PLAYER,
     PLAYER_ON_TARGET
 )
+from .sokoban_utils import make_prompt
 
 # Algorithm constants (tuning parameters for algorithms)
 MAX_BFS_DEPTH = 100
@@ -49,10 +50,13 @@ class TrainingExample:
 
     @property
     def metadata(self) -> Dict[str, Any]:
+        optimal_steps = len(self.optimal_path) if self.optimal_path else 0
         return {
             "grid_size": self._extract_grid_size(),
-            "optimal_path_length": len(self.optimal_path) if self.optimal_path else 0,
             "num_boxes": self._count_boxes(),
+            "optimal_steps": optimal_steps,
+            "optimal_path_length": optimal_steps,  # Keep for backwards compatibility
+            "current_step": self.trace[0].step if self.trace else 0,
             "action_name": self.trace[0].action.action_name if self.trace[0].action else None,
             "action_id": self.trace[0].action.action_id if self.trace[0].action else None,
             "deadlock_type": self.deadlock_type
@@ -551,23 +555,36 @@ class SokobanGenerator:
         return examples
 
     def generate_multiple_examples(
-        self, count: int, sizes: List[int], every_k: int = None
+        self, count: int, map_configs: List[Tuple[int, int]] = None, sizes: List[int] = None, every_k: int = None
     ) -> List[TrainingExample]:
-        """Generate multiple training examples across different sizes"""
+        """Generate multiple training examples across different sizes and box configurations
+
+        Args:
+            count: Number of examples to generate
+            map_configs: List of (size, num_boxes) tuples. If provided, overrides sizes parameter.
+            sizes: List of map sizes (legacy support, calculates boxes automatically)
+            every_k: Generate intermediate steps every k moves
+        """
         examples = []
         successful = 0
         attempts = count * 3
+
+        # Convert sizes to map_configs if needed (backwards compatibility)
+        if map_configs is None and sizes is not None:
+            map_configs = [(size, min(3, max(1, size // 3))) for size in sizes]
+        elif map_configs is None:
+            raise ValueError("Either map_configs or sizes must be provided")
 
         with tqdm(total=count, desc="Generating Sokoban examples") as pbar:
             for i in range(attempts):
                 if successful >= count:
                     break
 
-                size = sizes[i % len(sizes)]
+                size, num_boxes = map_configs[i % len(map_configs)]
 
                 config = SokobanConfig(
                     dim_room=(size, size),
-                    num_boxes=min(3, max(1, size // 3)),
+                    num_boxes=num_boxes,
                     max_steps=size * size,
                     dataset_seed_start=self.config.dataset_seed_start + i,
                 )
@@ -858,10 +875,22 @@ class SokobanDeadlockGenerator:
         except Exception:
             return None
 
-    def generate_multiple_examples(self, count: int, sizes: List[int]) -> List[TrainingExample]:
-        """Generate examples with better batching and early termination"""
+    def generate_multiple_examples(self, count: int, map_configs: List[Tuple[int, int]] = None, sizes: List[int] = None) -> List[TrainingExample]:
+        """Generate examples with better batching and early termination
+
+        Args:
+            count: Number of examples to generate
+            map_configs: List of (size, num_boxes) tuples. If provided, overrides sizes parameter.
+            sizes: List of map sizes (legacy support, calculates boxes automatically)
+        """
         examples = []
         successful = 0
+
+        # Convert sizes to map_configs if needed (backwards compatibility)
+        if map_configs is None and sizes is not None:
+            map_configs = [(size, min(2, max(1, size // 4))) for size in sizes]
+        elif map_configs is None:
+            raise ValueError("Either map_configs or sizes must be provided")
 
         # Reduce attempts multiplier since we're more efficient now
         max_attempts = count * 2  # Reduced from 3x
@@ -871,11 +900,11 @@ class SokobanDeadlockGenerator:
                 if successful >= count:
                     break
 
-                size = sizes[i % len(sizes)]
+                size, num_boxes = map_configs[i % len(map_configs)]
 
                 config = SokobanConfig(
                     dim_room=(size, size),
-                    num_boxes=min(2, max(1, size // 4)),  # Fewer boxes for faster generation
+                    num_boxes=num_boxes,
                     max_steps=size * size,
                     dataset_seed_start=self.config.dataset_seed_start + i,
                 )
@@ -912,39 +941,9 @@ class SokobanBuilder:
         deadlock_state: str = None, deadlock_type: str = None
     ) -> Dict[str, Any]:
         """Format training examples into prompt-response pairs"""
-        legend = ", ".join(f"{k} = {v}" for k, v in self.base_config.grid_vocab.items())
-
         state_representation = deadlock_state if deadlock_state else trace_item.state_representation
 
-        prompt = f"""<|im_start|>user
-You are a Sokoban solver.
-
-Sokoban Quick Guide
-Goal: Push all boxes (X) onto targets (O).
-
-Symbols:
-{legend}
-
-Rules:
-
-Push boxes (can't pull).
-Avoid walls (#).
-Answers:
-<answer> Up </answer> | <answer> Down </answer> | <answer> Left </answer> | <answer> Right </answer>
-
-Rewards:
-Move: -0.1
-Box on target: +1.0
-All boxes placed: +10.0
-
-[Cumulative Observations]:
-
-{state_representation}
-
-Decide the next action:
-Always output: <answer> [your answer] </answer> with no extra text. Strictly follow this format. <|im_end|>
-<|im_start|>assistant
-"""
+        prompt = make_prompt(state_representation)
 
         return {
             "prompt": prompt,
@@ -992,22 +991,36 @@ def generate_dataset_split(
     split_name: str,
     num_examples: int,
     num_deadlocks: int,
-    sizes: List[int],
-    args,
-    base_config: SokobanConfig,
+    map_configs: List[Tuple[int, int]] = None,
+    sizes: List[int] = None,
+    args = None,
+    base_config: SokobanConfig = None,
     every_k: Optional[int] = None,
 ):
-    """Generate examples for a single dataset split"""
+    """Generate examples for a single dataset split
+
+    Args:
+        split_name: Name of the split (e.g., 'train', 'val', 'test')
+        num_examples: Number of solvable examples to generate
+        num_deadlocks: Number of deadlock examples to generate
+        map_configs: List of (size, num_boxes) tuples for map configurations
+        sizes: List of map sizes (legacy support, will be converted to map_configs)
+        args: Command line arguments
+        base_config: Base Sokoban configuration
+        every_k: Generate intermediate steps every k moves
+    """
     if num_examples <= 0 and num_deadlocks <= 0:
         return []
 
     print(f"\nGenerating {split_name} split ({num_examples} solvable + {num_deadlocks} unsolvable):")
+    if map_configs:
+        print(f"Map configurations: {map_configs}")
 
     generator = SokobanGenerator(base_config)
-    all_examples = generator.generate_multiple_examples(num_examples, sizes, every_k)
+    all_examples = generator.generate_multiple_examples(num_examples, map_configs=map_configs, sizes=sizes, every_k=every_k)
 
     deadlock_generator = SokobanDeadlockGenerator(base_config)
-    all_deadlocks = deadlock_generator.generate_multiple_examples(num_deadlocks, sizes)
+    all_deadlocks = deadlock_generator.generate_multiple_examples(num_deadlocks, map_configs=map_configs, sizes=sizes)
 
     all_data = all_examples + all_deadlocks
 
@@ -1036,9 +1049,37 @@ def generate_dataset_split(
     return all_data
 
 
+def parse_map_config(config_str: str) -> Tuple[int, int]:
+    """Parse a map configuration string in format 'size:boxes'
+
+    Args:
+        config_str: String in format 'size:boxes' (e.g., '6:1' or '8:2')
+
+    Returns:
+        Tuple of (size, num_boxes)
+    """
+    try:
+        parts = config_str.split(':')
+        if len(parts) != 2:
+            raise ValueError(f"Invalid format: {config_str}. Expected 'size:boxes'")
+        size = int(parts[0])
+        boxes = int(parts[1])
+        return (size, boxes)
+    except ValueError as e:
+        raise ValueError(f"Error parsing map config '{config_str}': {e}")
+
+
 def main():
     """Main function with argument parsing"""
-    parser = argparse.ArgumentParser(description="Generate Sokoban training datasets")
+    parser = argparse.ArgumentParser(
+        description="Generate Sokoban training datasets",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Using new map configurations (size:boxes format)
+  python sokoban_data_gen.py --train 100 --train-maps 6:1 7:1 8:1 8:2 9:2
+        """
+    )
     parser.add_argument(
         "--train", type=int, default=0, help="Number of training examples"
     )
@@ -1056,27 +1097,29 @@ def main():
     parser.add_argument("--train-deadlocks", type=int, default=0, help="Number of training deadlock examples")
     parser.add_argument("--val-deadlocks", type=int, default=0, help="Number of validation deadlock examples")
 
+    # New map configuration arguments (size:boxes format)
     parser.add_argument(
-        "--train-sizes",
+        "--train-maps",
         nargs="+",
-        type=int,
-        default=[6, 7, 8],
-        help="Training data map size(s)",
+        type=str,
+        default=None,
+        help="Training map configurations in 'size:boxes' format (e.g., 6:1 7:1 8:2). Overrides --train-sizes.",
     )
     parser.add_argument(
-        "--val-sizes",
+        "--val-maps",
         nargs="+",
-        type=int,
-        default=[6, 7, 8],
-        help="Validation data map size(s)",
+        type=str,
+        default=None,
+        help="Validation map configurations in 'size:boxes' format (e.g., 6:1 7:1 8:2). Overrides --val-sizes.",
     )
     parser.add_argument(
-        "--test-sizes",
+        "--test-maps",
         nargs="+",
-        type=int,
-        default=[9, 10],
-        help="Test data map size(s)",
+        type=str,
+        default=None,
+        help="Test map configurations in 'size:boxes' format (e.g., 9:1 10:2). Overrides --test-sizes.",
     )
+
     parser.add_argument(
         "--output", type=str, default="sokoban", help="Base output filename prefix"
     )
@@ -1084,7 +1127,7 @@ def main():
         "--num-boxes",
         type=int,
         default=1,
-        help="Number of boxes (overrides size-based scaling)",
+        help="Number of boxes (deprecated - use --train-maps, --val-maps, --test-maps instead)",
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
@@ -1092,6 +1135,18 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Parse map configurations
+    train_map_configs = None
+    val_map_configs = None
+    test_map_configs = None
+
+    if args.train_maps:
+        train_map_configs = [parse_map_config(m) for m in args.train_maps]
+    if args.val_maps:
+        val_map_configs = [parse_map_config(m) for m in args.val_maps]
+    if args.test_maps:
+        test_map_configs = [parse_map_config(m) for m in args.test_maps]
 
     # Set up base configuration - use seed from args if provided
     base_config = SokobanConfig(dataset_seed_start=args.seed if args.seed else 1000)
@@ -1103,9 +1158,36 @@ def main():
             return
 
     # Generate each split
-    generate_dataset_split("train", args.train, args.train_deadlocks, args.train_sizes, args, base_config, every_k=args.every_k)
-    generate_dataset_split("val", args.val, args.val_deadlocks, args.val_sizes, args, base_config, every_k=None)
-    generate_dataset_split("test", args.test, 0, args.test_sizes, args, base_config, every_k=None)
+    generate_dataset_split(
+        "train",
+        args.train,
+        args.train_deadlocks,
+        map_configs=train_map_configs,
+        sizes=args.train_sizes if not train_map_configs else None,
+        args=args,
+        base_config=base_config,
+        every_k=args.every_k
+    )
+    generate_dataset_split(
+        "val",
+        args.val,
+        args.val_deadlocks,
+        map_configs=val_map_configs,
+        sizes=args.val_sizes if not val_map_configs else None,
+        args=args,
+        base_config=base_config,
+        every_k=None
+    )
+    generate_dataset_split(
+        "test",
+        args.test,
+        0,
+        map_configs=test_map_configs,
+        sizes=args.test_sizes if not test_map_configs else None,
+        args=args,
+        base_config=base_config,
+        every_k=None
+    )
 
     print(f"\nDataset generation complete! Files saved with prefix '{args.output}'")
 
